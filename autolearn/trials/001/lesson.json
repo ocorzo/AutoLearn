@@ -1,0 +1,63 @@
+{
+  "lesson_id": "L-0001",
+  "trial_id": "001",
+  "status": "candidate_quarantined",
+  "authorized_at": "2026-09-17",
+  "source": {
+    "system": "Mem0",
+    "memory_id": "9e2e577f-9829-4626-a9c0-97f1bbd0492d",
+    "scope": "global"
+  },
+  "fact": {
+    "entity": "cuarto flexible del proyecto de vivienda vigente",
+    "attribute": "ubicacion",
+    "value": "planta baja junto al patio con bano accesible inmediato"
+  },
+  "constraints": {
+    "train_only_after_baseline": true,
+    "exclude_mem0_from_evaluation": true,
+    "production_deployment_allowed": false
+  },
+  "dataset": {
+    "train_file": "train.jsonl",
+    "train_example_count": 16,
+    "reasoning_anchor_count": 12,
+    "reasoning_example_ratio": 0.75,
+    "eval_file": "eval.jsonl",
+    "eval_example_count": 3,
+    "eval_used_for_training": false
+  },
+  "sentinels": {
+    "file": "sentinels_eval.jsonl",
+    "count": 15,
+    "used_for_training": false,
+    "baseline_required": true,
+    "post_training_required": true,
+    "baseline_file": "sentinels_baseline.jsonl",
+    "baseline_correct": 13,
+    "baseline_total": 15,
+    "acceptance_rule": "No new sentinel failures relative to this baseline."
+  },
+  "candidate": {
+    "remote_path": "/home/ocorzo/bigone-llm/autolearn/outputs/trial-001/lora-candidate",
+    "adapter_model_bytes": 84972248,
+    "training_steps": 48,
+    "training_runtime_seconds": 26.79,
+    "end_to_end_runtime_seconds": 37.59,
+    "training_loss": 0.6779,
+    "production_deployment_allowed": false,
+    "evaluation": {
+      "remote_path": "/home/ocorzo/bigone-llm/autolearn/outputs/trial-001/evaluation-1",
+      "mem0_retrieval": false,
+      "lesson_correct": 2,
+      "lesson_total": 3,
+      "failed_lesson_type": "paraphrase",
+      "sentinels_correct": 13,
+      "sentinels_total": 15,
+      "baseline_failed_sentinels": ["S-11", "S-12"],
+      "candidate_failed_sentinels": ["S-12", "S-13"],
+      "new_sentinel_failures": ["S-13"],
+      "disposition": "quarantined"
+    }
+  }
+}

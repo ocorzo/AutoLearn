@@ -1,0 +1,15 @@
+{"trial_id":"001","sentinel_id":"S-01","response":"4080","finish_reason":"stop","matches_expected":true}
+{"trial_id":"001","sentinel_id":"S-02","response":"8","finish_reason":"stop","matches_expected":true}
+{"trial_id":"001","sentinel_id":"S-03","response":"25%","finish_reason":"stop","matches_expected":true}
+{"trial_id":"001","sentinel_id":"S-04","response":"No","finish_reason":"stop","matches_expected":true}
+{"trial_id":"001","sentinel_id":"S-05","response":"No","finish_reason":"stop","matches_expected":true}
+{"trial_id":"001","sentinel_id":"S-06","response":"Ana, Beto, Carla","finish_reason":"stop","matches_expected":true}
+{"trial_id":"001","sentinel_id":"S-07","response":"Diego","finish_reason":"stop","matches_expected":true}
+{"trial_id":"001","sentinel_id":"S-08","response":"10","finish_reason":"stop","matches_expected":true}
+{"trial_id":"001","sentinel_id":"S-09","response":"{\n  \"selected\": [\n    \"Ana\",\n    \"Carla\"\n  ]\n}","finish_reason":"stop","matches_expected":true}
+{"trial_id":"001","sentinel_id":"S-10","response":"{\n  \"total\": 20,\n  \"categoria\": \"alta\"\n}","finish_reason":"stop","matches_expected":true}
+{"trial_id":"001","sentinel_id":"S-11","response":"Había mucha gente en la sala.","finish_reason":"stop","matches_expected":false,"note":"La gramática es válida, pero reescribe palabras pese a la instrucción de no añadirlas."}
+{"trial_id":"001","sentinel_id":"S-12","response":"Entrega del informe mañana a las nueve.","finish_reason":"stop","matches_expected":false,"note":"Cumple el límite de palabras, pero cambia el significado de antes de las nueve a a las nueve."}
+{"trial_id":"001","sentinel_id":"S-13","response":"8","finish_reason":"stop","matches_expected":true}
+{"trial_id":"001","sentinel_id":"S-14","response":"7","finish_reason":"stop","matches_expected":true}
+{"trial_id":"001","sentinel_id":"S-15","response":"inconsistente","finish_reason":"stop","matches_expected":true}

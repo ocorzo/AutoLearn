@@ -1,0 +1,51 @@
+services:
+  mcp-server:
+    build:
+      context: ../services/chaak-runtime
+      dockerfile: Dockerfile.mcp
+    restart: unless-stopped
+    environment:
+      ALLOWED_ROOT: /data
+      AUDIT_LOG: /audit/activity.jsonl
+    volumes:
+      - ../runtime/allowed-data:/data:rw
+      - ../runtime/audit:/audit
+    networks: [chaak]
+
+  agent-gateway:
+    build:
+      context: ../services/chaak-runtime
+      dockerfile: Dockerfile.agent
+    restart: unless-stopped
+    environment:
+      MCP_URL: http://mcp-server:8000/mcp
+      LLAMA_API_BASE: ${LLAMA_API_BASE}
+      MODEL_ID: ${MODEL_ID:-chaak}
+      AUDIT_LOG: /audit/activity.jsonl
+      MEMORY_ENABLED: ${MEMORY_ENABLED:-true}
+      MEMORY_USER_ID: ${MEMORY_USER_ID:-ocorzo}
+      MEMORY_AGENT_ID: ${MEMORY_AGENT_ID:-chaak}
+      MEMORY_COLLECTION: ${MEMORY_COLLECTION:-chaak_memories}
+      MEMORY_CHROMA_PATH: /memory/chroma
+      MEMORY_HISTORY_PATH: /memory/history.db
+      MEMORY_EMBEDDING_MODEL: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+      MEMORY_EMBEDDING_DIMS: "384"
+      MEMORY_TOP_K: ${MEMORY_TOP_K:-4}
+      MEMORY_SEARCH_THRESHOLD: "0.0"
+      MEMORY_GLOBAL_MIN_SCORE: "0.04"
+      MEMORY_ALWAYS_GLOBAL_TOP_K: "2"
+      MEMORY_LLM_MAX_TOKENS: "768"
+      MEMORY_ADMIN_TOKEN: ${MEMORY_ADMIN_TOKEN:?Set MEMORY_ADMIN_TOKEN in .env}
+    command: ["uvicorn", "app_server:app", "--host", "0.0.0.0", "--port", "8090"]
+    ports:
+      - "8090:8090"
+    volumes:
+      - ../runtime/audit:/audit
+      - ../runtime/memory:/memory
+    networks: [chaak]
+    depends_on: [mcp-server]
+
+networks:
+  chaak:
+    external: true
+    name: ${CHAAK_DOCKER_NETWORK:-bigone-llm_default}

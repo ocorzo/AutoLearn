@@ -14,3 +14,5 @@ The first trial mounts these host directories under `/workspace`:
 The trainer must not bind to ports or replace the production `llama-server` container. It writes only to the mounted `outputs` directory. `train_lora.py` rejects an attempt to use the frozen evaluation file as training input and requires at least 75% reasoning anchors.
 
 `run-training.sh` is deliberately an explicit launch command. Preparing this environment does not launch a training run or promote an adapter to production.
+
+`run-evaluation.sh baseline` evaluates the base checkpoint and `run-evaluation.sh candidate` evaluates the LoRA adapter. Both use the same engine, prompts and scoring, so sentinel regressions must be judged only between these two runs. Sentinels whose scoring cannot be automated (`semantic_and_length`) are reported under `sentinels_needs_manual_review` instead of being counted as failures.

@@ -25,9 +25,17 @@ una herramienta que el modelo deba recordar invocar.
 
 ## Límites de seguridad
 
+- Con `GATEWAY_API_KEY` definido, los endpoints `/v1/*` del gateway exigen
+  `Authorization: Bearer <clave>`; `/health` permanece abierto. La
+  administración de memoria usa además su propio `MEMORY_ADMIN_TOKEN`.
 - MCP no expone un puerto al host; sólo se comunica con el gateway por la red
   Docker.
-- Las herramientas de archivos se limitan al volumen `runtime/allowed-data/`.
+- Las herramientas de archivos se limitan al volumen `runtime/allowed-data/` y
+  son de solo lectura por defecto: el volumen se monta `:ro` y `write_file`,
+  `replace_in_file` y `delete_file` no se registran. Para habilitarlas hay que
+  definir `MCP_ALLOW_WRITES=true` y `MCP_DATA_MODE=rw` en `.env`.
+- La consulta de `search_web` se toma del mensaje original del usuario, nunca
+  del contexto enriquecido con memorias de Mem0.
 - Las memorias, auditorías, conversaciones y credenciales son datos locales y
   no se versionan.
 - El LLM se referencia mediante `LLAMA_API_BASE`; los pesos/modelos no forman

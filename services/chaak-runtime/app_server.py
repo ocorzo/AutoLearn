@@ -10,7 +10,8 @@ from smolagents import MCPClient, OpenAIServerModel, ToolCallingAgent
 from memory_service import MemoryService, enrich_messages, latest_user_text
 
 app = FastAPI(title="BigOne smolagents runner")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+_CORS_ORIGINS = [o.strip() for o in os.environ.get("CORS_ALLOW_ORIGINS", "*").split(",") if o.strip()]
+app.add_middleware(CORSMiddleware, allow_origins=_CORS_ORIGINS or ["*"], allow_methods=["*"], allow_headers=["*"])
 
 AUDIT_LOG = Path(os.environ.get("AUDIT_LOG", "/audit/activity.jsonl"))
 _AUDIT_LOCK = threading.Lock()
@@ -149,8 +150,13 @@ def _messages_with_verified_tool_result(messages: list[dict], tool: str, result:
     return [{"role": "system", "content": block.strip()}, *enriched]
 
 def run_required_web_search(messages: list[dict], request_id: str, req: "ChatRequest") -> str:
-    """Execute an explicitly named web search before allowing an answer."""
-    query = _web_query_from_request(messages)
+    """Execute an explicitly named web search before allowing an answer.
+
+    ``messages`` may already carry recalled Mem0 context, so the public query is
+    extracted from the client's original ``req.messages``: private memories must
+    never reach an external search engine.
+    """
+    query = _web_query_from_request(req.messages)
     if not query:
         return "Necesito una consulta concreta para realizar la búsqueda web."
     config = {"url": os.environ.get("MCP_URL", "http://mcp-server:8000/mcp"), "transport": "streamable-http"}
@@ -305,12 +311,18 @@ def run_vision_direct(messages: list[dict], request_id: str, req: "ChatRequest")
     message = choice.get("message") or {}
     return str(message.get("content") or "")
 
+def _file_tools_policy() -> str:
+    if os.environ.get("MCP_ALLOW_WRITES", "false").strip().lower() in {"1", "true", "yes", "on"}:
+        return ("Las herramientas de archivos están limitadas a /data; modifica o borra archivos solo "
+                "si la persona lo pidió explícitamente en la solicitud actual.")
+    return "Las herramientas de archivos son de solo lectura y están limitadas a /data."
+
 def _multimodal_tool_policy() -> str:
     return (
         "REGLAS OPERATIVAS: conserva y analiza las imágenes recibidas. Usa herramientas solo "
         "cuando ayuden a la solicitud actual. La navegación web solo se usa si la persona pidió "
-        "explícitamente buscar, navegar o leer una URL; nunca envíes datos privados. Las herramientas "
-        "de archivos son de solo lectura y están limitadas a /data. Después de usar una herramienta, "
+        "explícitamente buscar, navegar o leer una URL; nunca envíes datos privados. "
+        + _file_tools_policy() + " Después de usar una herramienta, "
         "responde al usuario con el resultado y no describas detalles internos del agente."
     )
 
@@ -574,7 +586,7 @@ def run_agent(messages: list[dict], request_id: str) -> str:
         "La navegación web solo se usa cuando la persona pidió explícitamente buscar, navegar o leer una URL; "
         "nunca envíes datos privados, credenciales ni contenido de archivos a una búsqueda. "
         "run_python es un entorno aislado para cálculos y datos, no una vía para administrar el servidor. "
-        "Las herramientas de archivos son solo de lectura y están limitadas a /data."
+        + _file_tools_policy()
     )
     task = (system + "\n\n" if system else "") + policy + "\n\n"
     task += "PETICIÓN ACTUAL (prioridad máxima; ignora nombres de herramientas de turnos anteriores):\n"
@@ -605,8 +617,22 @@ def run_agent(messages: list[dict], request_id: str) -> str:
                 )
             raise
 
+def _require_gateway_key(authorization: str | None = Header(default=None)) -> None:
+    """Require ``Authorization: Bearer <GATEWAY_API_KEY>`` when a key is configured.
+
+    Without GATEWAY_API_KEY the gateway keeps its historical open behavior for
+    a trusted local network; /health reports which mode is active.
+    """
+    expected = os.environ.get("GATEWAY_API_KEY", "")
+    if not expected:
+        return
+    scheme, _, supplied = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not secrets.compare_digest(supplied.strip(), expected):
+        raise HTTPException(status_code=401, detail="Invalid gateway API key.",
+                            headers={"WWW-Authenticate": "Bearer"})
+
 @app.get("/health")
-def health(): return {"status": "ok", "service": "smolagents", "mcp": os.environ.get("MCP_URL"), "reasoning_profile": ACTIVE_REASONING_PROFILE, "memory": MEMORY.status()}
+def health(): return {"status": "ok", "service": "smolagents", "mcp": os.environ.get("MCP_URL"), "reasoning_profile": ACTIVE_REASONING_PROFILE, "memory": MEMORY.status(), "auth_required": bool(os.environ.get("GATEWAY_API_KEY"))}
 
 def _require_memory_admin(x_memory_admin_token: str | None = Header(default=None)) -> None:
     expected = os.environ.get("MEMORY_ADMIN_TOKEN")
@@ -650,11 +676,11 @@ def delete_memory(memory_id: str, user: str | None = None, scenario_id: str | No
 @app.get("/")
 def root(): return {"service": "BigOne smolagents runner", "status": "ok", "openai_base": "/v1", "health": "/health"}
 
-@app.get("/v1/reasoning-profile")
+@app.get("/v1/reasoning-profile", dependencies=[Depends(_require_gateway_key)])
 def get_reasoning_profile():
     return {"active": ACTIVE_REASONING_PROFILE, "profiles": REASONING_PROFILES}
 
-@app.get("/v1/activity")
+@app.get("/v1/activity", dependencies=[Depends(_require_gateway_key)])
 def activity(limit: int = 80):
     """Recent audit events plus live KV/context state from llama-server."""
     limit = min(max(limit, 1), 300)
@@ -682,7 +708,7 @@ def activity(limit: int = 80):
     }
     return {"context": context, "metrics": _metrics_snapshot(), "events": events}
 
-@app.put("/v1/reasoning-profile")
+@app.put("/v1/reasoning-profile", dependencies=[Depends(_require_gateway_key)])
 def set_reasoning_profile(req: ReasoningProfileRequest):
     global ACTIVE_REASONING_PROFILE
     if req.profile not in REASONING_PROFILES:
@@ -704,13 +730,14 @@ input{width:100%;accent-color:#d68d25} .labels{display:flex;justify-content:spac
 <p>Mueve el selector. Se aplica a las siguientes solicitudes del agente; una respuesta que ya está generándose no cambia.</p>
 <input id=\"profile\" type=\"range\" min=\"0\" max=\"3\" step=\"1\"><div class=\"labels\"><span>Rápido</span><span>Breve</span><span>Normal</span><span>Profundo</span></div>
 <div id=\"status\">Cargando…</div><section class=\"activity\"><h2>Actividad, tokens y contexto</h2><div class=\"card\"><b>Contexto del slot</b><div id=\"context\" class=\"num\">Cargando…</div><div class=\"bar\"><i id=\"bar\" style=\"width:0%\"></i></div><div id=\"context-detail\" class=\"muted\"></div></div><div class=\"grid\" style=\"margin-top:10px\"><div class=\"card\"><div class=\"muted\">Prompt / s</div><div id=\"prompt-tps\" class=\"num\">—</div></div><div class=\"card\"><div class=\"muted\">Generación / s</div><div id=\"gen-tps\" class=\"num\">—</div></div><div class=\"card\"><div class=\"muted\">Slot</div><div id=\"busy\" class=\"num\">—</div></div><div class=\"card\"><div class=\"muted\">Actualización</div><div id=\"updated\" class=\"num\">—</div></div></div><h3>Bitácora</h3><div id=\"events\" class=\"events muted\">Cargando…</div></section></main><script>
+const KEY='chaakGatewayKey';let asked=false;async function api(u,o={}){const k=(()=>{try{return localStorage.getItem(KEY)||''}catch(e){return ''}})();const r=await fetch(u,Object.assign({},o,{headers:Object.assign({},o.headers,k?{'Authorization':'Bearer '+k}:{})}));if(r.status===401&&!asked){asked=true;const n=prompt('Clave del gateway (GATEWAY_API_KEY)');if(n){try{localStorage.setItem(KEY,n)}catch(e){}asked=false;return api(u,o);}}return r;}
 const names=['fast','brief','normal','deep']; const labels=['Rápido','Breve','Normal','Profundo']; const slider=document.querySelector('#profile'); const status=document.querySelector('#status');
-async function load(){const r=await fetch('/v1/reasoning-profile');const j=await r.json();slider.value=names.indexOf(j.active);show(j.active,j.profiles[j.active]);}
+async function load(){const r=await api('/v1/reasoning-profile');const j=await r.json();slider.value=names.indexOf(j.active);show(j.active,j.profiles[j.active]);}
 function show(key,p){status.innerHTML='<b>'+p.label+'</b><br>'+p.description+'<br><small>Perfil activo: <code>'+key+'</code></small>';}
-slider.oninput=async()=>{const key=names[slider.value];status.textContent='Aplicando '+labels[slider.value]+'…';const r=await fetch('/v1/reasoning-profile',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({profile:key})});const j=await r.json();show(j.active,j.profile);};
+slider.oninput=async()=>{const key=names[slider.value];status.textContent='Aplicando '+labels[slider.value]+'…';const r=await api('/v1/reasoning-profile',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({profile:key})});const j=await r.json();show(j.active,j.profile);};
 const esc=s=>String(s??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 function eventLine(e){let body='';if(e.kind==='tool'){body='🔧 <b>'+esc(e.tool)+'</b> · '+esc(Object.entries(e.details||{}).map(([k,v])=>k+'='+JSON.stringify(v)).join(' · '));}else if(e.kind==='model'){body='🧠 <b>Modelo</b> · '+esc(e.profile)+' · entrada '+e.prompt_tokens+' · caché '+e.cached_tokens+' · salida '+e.completion_tokens+' · '+(e.prompt_tps??'—')+' t/s lectura · '+(e.generation_tps??'—')+' t/s generación · '+e.elapsed_ms+' ms';}else if(e.kind==='guard'){body='🛑 <b>Protección anti-bucle</b> · '+esc(e.rule||'sin detalle')+' · repetición '+esc(String(e.count||''));}else{body='💬 <b>Solicitud</b> · '+esc(e.status)+' · '+esc(e.profile)+(e.elapsed_ms?' · '+e.elapsed_ms+' ms':'');}return '<div class=\"event '+esc(e.kind)+'\"><span class=\"muted\">'+esc(new Date(e.ts).toLocaleTimeString())+'</span><span>'+body+'</span></div>';}
-async function refreshActivity(){try{const j=await (await fetch('/v1/activity?limit=100')).json(),c=j.context,m=j.metrics||{};document.querySelector('#context').textContent=(c.used_tokens||0).toLocaleString()+' / '+(c.capacity_tokens||'—').toLocaleString()+' tokens';document.querySelector('#bar').style.width=(c.used_percent||0)+'%';document.querySelector('#context-detail').textContent=(c.remaining_tokens||0).toLocaleString()+' restantes · '+(c.used_percent??'—')+'% usado · '+(c.cached_prompt_tokens||0).toLocaleString()+' reutilizados de caché';document.querySelector('#prompt-tps').textContent=(m['llamacpp:prompt_tokens_seconds']||0).toFixed(1)+' t/s';document.querySelector('#gen-tps').textContent=(m['llamacpp:predicted_tokens_seconds']||0).toFixed(1)+' t/s';document.querySelector('#busy').textContent=c.is_processing?'Procesando':'En espera';document.querySelector('#updated').textContent=new Date().toLocaleTimeString();document.querySelector('#events').innerHTML=j.events.length?j.events.slice().reverse().map(eventLine).join(''):'Aún no hay actividad registrada.';}catch(e){document.querySelector('#events').textContent='No se pudo leer la telemetría.';}}
+async function refreshActivity(){try{const j=await (await api('/v1/activity?limit=100')).json(),c=j.context,m=j.metrics||{};document.querySelector('#context').textContent=(c.used_tokens||0).toLocaleString()+' / '+(c.capacity_tokens||'—').toLocaleString()+' tokens';document.querySelector('#bar').style.width=(c.used_percent||0)+'%';document.querySelector('#context-detail').textContent=(c.remaining_tokens||0).toLocaleString()+' restantes · '+(c.used_percent??'—')+'% usado · '+(c.cached_prompt_tokens||0).toLocaleString()+' reutilizados de caché';document.querySelector('#prompt-tps').textContent=(m['llamacpp:prompt_tokens_seconds']||0).toFixed(1)+' t/s';document.querySelector('#gen-tps').textContent=(m['llamacpp:predicted_tokens_seconds']||0).toFixed(1)+' t/s';document.querySelector('#busy').textContent=c.is_processing?'Procesando':'En espera';document.querySelector('#updated').textContent=new Date().toLocaleTimeString();document.querySelector('#events').innerHTML=j.events.length?j.events.slice().reverse().map(eventLine).join(''):'Aún no hay actividad registrada.';}catch(e){document.querySelector('#events').textContent='No se pudo leer la telemetría.';}}
 load();refreshActivity();setInterval(refreshActivity,2000);
 </script>""")
 
@@ -721,16 +748,17 @@ def activity_panel():
 .events{gap:3px!important;max-height:calc(100vh - 260px);overflow:auto}.events h2{margin:0 0 8px}.event{padding:8px 11px!important;border-left-width:3px!important;display:flex;align-items:baseline;gap:10px;white-space:nowrap;overflow:hidden;line-height:1.25}.event>.muted{flex:0 0 72px}.event> :last-child{overflow:hidden;text-overflow:ellipsis}
 body{font-family:system-ui,sans-serif;background:#121212;color:#eee;max-width:980px;margin:4vh auto;padding:24px}a{color:#e6af5a}header{display:flex;justify-content:space-between;align-items:baseline}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.card,.event{background:#202020;border-radius:12px;padding:15px}.num{font-size:1.35rem;font-weight:700}.muted{color:#aaa;font-size:.88rem}.bar{height:15px;background:#333;border-radius:9px;overflow:hidden;margin:10px 0}.bar>i{display:block;height:100%;background:#d68d25}.events{margin-top:18px;display:grid;gap:8px}.event{border-left:4px solid #666}.tool{border-color:#49a5e6}.model{border-color:#d68d25}.request{border-color:#8ec36b}code{color:#f2ba61}@media(max-width:700px){.grid{grid-template-columns:repeat(2,1fr)}}
 </style><header><h1>Balam · actividad</h1><a href=\"/control\">← Perfil</a></header><section class=\"card\"><b>Contexto del slot</b><div id=\"context\" class=\"num\">Cargando…</div><div class=\"bar\"><i id=\"bar\" style=\"width:0%\"></i></div><div id=\"context-detail\" class=\"muted\"></div></section><section class=\"grid\" style=\"margin-top:12px\"><div class=\"card\"><div class=\"muted\">Prompt / s</div><div id=\"prompt-tps\" class=\"num\">—</div></div><div class=\"card\"><div class=\"muted\">Generación / s</div><div id=\"gen-tps\" class=\"num\">—</div></div><div class=\"card\"><div class=\"muted\">Slot</div><div id=\"busy\" class=\"num\">—</div></div><div class=\"card\"><div class=\"muted\">Actualización</div><div id=\"updated\" class=\"num\">—</div></div></section><section class=\"events\"><h2>Bitácora</h2><div id=\"events\" class=\"muted\">Cargando…</div></section><script>
+const KEY='chaakGatewayKey';let asked=false;async function api(u,o={}){const k=(()=>{try{return localStorage.getItem(KEY)||''}catch(e){return ''}})();const r=await fetch(u,Object.assign({},o,{headers:Object.assign({},o.headers,k?{'Authorization':'Bearer '+k}:{})}));if(r.status===401&&!asked){asked=true;const n=prompt('Clave del gateway (GATEWAY_API_KEY)');if(n){try{localStorage.setItem(KEY,n)}catch(e){}asked=false;return api(u,o);}}return r;}
 const esc=s=>String(s??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 function line(e){let b='';if(e.kind==='tool'){b='🔧 <b>'+esc(e.tool)+'</b> · '+esc(Object.entries(e.details||{}).map(([k,v])=>k+'='+JSON.stringify(v)).join(' · '));}else if(e.kind==='model'){b='🧠 <b>Modelo</b> · '+esc(e.profile)+' · entrada '+e.prompt_tokens+' · caché '+e.cached_tokens+' · salida '+e.completion_tokens+' · '+(e.prompt_tps??'—')+' t/s lectura · '+(e.generation_tps??'—')+' t/s generación · '+e.elapsed_ms+' ms';}else if(e.kind==='guard'){b='🛑 <b>Protección anti-bucle</b> · '+esc(e.rule||'sin detalle')+' · repetición '+esc(String(e.count||''));}else{b='💬 <b>Solicitud</b> · '+esc(e.status)+' · '+esc(e.profile)+(e.elapsed_ms?' · '+e.elapsed_ms+' ms':'');}return '<div class=\"event '+esc(e.kind)+'\"><span class=\"muted\">'+esc(new Date(e.ts).toLocaleTimeString())+'</span><span>'+b+'</span></div>';}
-async function refresh(){try{const j=await (await fetch('/v1/activity?limit=100')).json(),c=j.context,m=j.metrics||{};document.querySelector('#context').textContent=(c.used_tokens||0).toLocaleString()+' / '+(c.capacity_tokens||'—').toLocaleString()+' tokens';document.querySelector('#bar').style.width=(c.used_percent||0)+'%';document.querySelector('#context-detail').textContent=(c.remaining_tokens||0).toLocaleString()+' restantes · '+(c.used_percent??'—')+'% usado · '+(c.cached_prompt_tokens||0).toLocaleString()+' reutilizados de caché';document.querySelector('#prompt-tps').textContent=(m['llamacpp:prompt_tokens_seconds']||0).toFixed(1)+' t/s';document.querySelector('#gen-tps').textContent=(m['llamacpp:predicted_tokens_seconds']||0).toFixed(1)+' t/s';document.querySelector('#busy').textContent=c.is_processing?'Procesando':'En espera';document.querySelector('#updated').textContent=new Date().toLocaleTimeString();document.querySelector('#events').innerHTML=j.events.length?j.events.slice().reverse().map(line).join(''):'Aún no hay actividad registrada.';}catch(e){document.querySelector('#events').textContent='No se pudo leer la telemetría.';}}
+async function refresh(){try{const j=await (await api('/v1/activity?limit=100')).json(),c=j.context,m=j.metrics||{};document.querySelector('#context').textContent=(c.used_tokens||0).toLocaleString()+' / '+(c.capacity_tokens||'—').toLocaleString()+' tokens';document.querySelector('#bar').style.width=(c.used_percent||0)+'%';document.querySelector('#context-detail').textContent=(c.remaining_tokens||0).toLocaleString()+' restantes · '+(c.used_percent??'—')+'% usado · '+(c.cached_prompt_tokens||0).toLocaleString()+' reutilizados de caché';document.querySelector('#prompt-tps').textContent=(m['llamacpp:prompt_tokens_seconds']||0).toFixed(1)+' t/s';document.querySelector('#gen-tps').textContent=(m['llamacpp:predicted_tokens_seconds']||0).toFixed(1)+' t/s';document.querySelector('#busy').textContent=c.is_processing?'Procesando':'En espera';document.querySelector('#updated').textContent=new Date().toLocaleTimeString();document.querySelector('#events').innerHTML=j.events.length?j.events.slice().reverse().map(line).join(''):'Aún no hay actividad registrada.';}catch(e){document.querySelector('#events').textContent='No se pudo leer la telemetría.';}}
 refresh();setInterval(refresh,2000);
 </script>""")
 
-@app.get("/v1/models")
+@app.get("/v1/models", dependencies=[Depends(_require_gateway_key)])
 def models(): return {"object": "list", "data": [{"id": os.environ.get("MODEL_ID", "qwen3.6-35b-a3b-q4"), "object": "model", "owned_by": "local"}]}
 
-@app.post("/v1/chat/completions")
+@app.post("/v1/chat/completions", dependencies=[Depends(_require_gateway_key)])
 def chat(req: ChatRequest, x_chatbox_chat_id: str | None = Header(default=None)):
     # A header keeps the standard OpenAI request body compatible with other
     # providers while giving the gateway a stable, per-Chatbox conversation ID.

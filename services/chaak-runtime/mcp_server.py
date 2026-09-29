@@ -14,6 +14,9 @@ mcp = FastMCP("bigone-tools")
 ALLOWED_ROOT = Path(os.environ.get("ALLOWED_ROOT", "/data"))
 AUDIT_LOG = Path(os.environ.get("AUDIT_LOG", "/audit/activity.jsonl"))
 _AUDIT_LOCK = threading.Lock()
+# File tools are read-only unless the operator opts in explicitly; the compose
+# file must then also mount /data read-write (MCP_DATA_MODE=rw).
+ALLOW_WRITES = os.environ.get("MCP_ALLOW_WRITES", "false").strip().lower() in {"1", "true", "yes", "on"}
 
 def _audit_event(kind: str, **details) -> None:
     """Append a small, structured event; never store file contents here."""
@@ -396,7 +399,11 @@ def read_file(path: str, max_chars: int = 12000) -> str:
     _trace("read_file", path=path, returned_chars=len(result))
     return result
 
-@mcp.tool()
+def _write_tool(fn):
+    """Register a mutating tool only when writes are enabled."""
+    return mcp.tool()(fn) if ALLOW_WRITES else fn
+
+@_write_tool
 def write_file(path: str, content: str, overwrite: bool = True) -> dict:
     """Crea o reemplaza un archivo de texto dentro de /data."""
     p = _safe_path(path)
@@ -412,7 +419,7 @@ def write_file(path: str, content: str, overwrite: bool = True) -> dict:
     _trace("write_file", path=path, chars=len(content), overwrite=overwrite)
     return {"status": "written", "path": str(p.relative_to(ALLOWED_ROOT)), "size_bytes": p.stat().st_size}
 
-@mcp.tool()
+@_write_tool
 def replace_in_file(path: str, old_text: str, new_text: str, replace_all: bool = False) -> dict:
     """Modifica un archivo reemplazando texto exacto dentro de /data."""
     p = _safe_path(path)
@@ -431,7 +438,7 @@ def replace_in_file(path: str, old_text: str, new_text: str, replace_all: bool =
     _trace("replace_in_file", path=path, matches=matches, replaced=matches if replace_all else 1)
     return {"status": "modified", "path": str(p.relative_to(ALLOWED_ROOT)), "replacements": matches if replace_all else 1}
 
-@mcp.tool()
+@_write_tool
 def delete_file(path: str) -> dict:
     """Borra un archivo dentro de /data; no permite borrar directorios."""
     p = _safe_path(path)

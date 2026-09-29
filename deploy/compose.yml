@@ -7,8 +7,11 @@ services:
     environment:
       ALLOWED_ROOT: /data
       AUDIT_LOG: /audit/activity.jsonl
+      MCP_ALLOW_WRITES: ${MCP_ALLOW_WRITES:-false}
     volumes:
-      - ../runtime/allowed-data:/data:rw
+      # Read-only by default. Enabling writes requires MCP_DATA_MODE=rw and
+      # MCP_ALLOW_WRITES=true together.
+      - ../runtime/allowed-data:/data:${MCP_DATA_MODE:-ro}
       - ../runtime/audit:/audit
     networks: [chaak]
 
@@ -22,6 +25,7 @@ services:
       LLAMA_API_BASE: ${LLAMA_API_BASE}
       MODEL_ID: ${MODEL_ID:-chaak}
       AUDIT_LOG: /audit/activity.jsonl
+      MCP_ALLOW_WRITES: ${MCP_ALLOW_WRITES:-false}
       MEMORY_ENABLED: ${MEMORY_ENABLED:-true}
       MEMORY_USER_ID: ${MEMORY_USER_ID:-ocorzo}
       MEMORY_AGENT_ID: ${MEMORY_AGENT_ID:-chaak}
@@ -36,6 +40,8 @@ services:
       MEMORY_ALWAYS_GLOBAL_TOP_K: "2"
       MEMORY_LLM_MAX_TOKENS: "768"
       MEMORY_ADMIN_TOKEN: ${MEMORY_ADMIN_TOKEN:?Set MEMORY_ADMIN_TOKEN in .env}
+      GATEWAY_API_KEY: ${GATEWAY_API_KEY:-}
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-*}
     command: ["uvicorn", "app_server:app", "--host", "0.0.0.0", "--port", "8090"]
     ports:
       - "8090:8090"

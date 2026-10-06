@@ -1,9 +1,12 @@
 # Chaak
 
-Chaak es un asistente local compuesto por un frontend Chatbox Lite, un gateway
-compatible con OpenAI, herramientas MCP, un LLM ejecutado localmente y memoria
-persistente con Mem0/Chroma. También incluye el pipeline `autolearn/` para
-entrenamiento y evaluación.
+Chaak reúne herramientas locales para trabajar con modelos de lenguaje y con
+una biblioteca musical personal. Incluye un runtime compatible con OpenAI, un
+pipeline de entrenamiento/evaluación y un recomendador experimental de
+playlists basado en coocurrencias humanas.
+
+No contiene música, una biblioteca personal, ni el Spotify Million Playlist
+Dataset (MPD), ni resultados derivados de ellos.
 
 ## Estructura
 
@@ -13,7 +16,30 @@ services/chaak-runtime/   Gateway, MCP, Mem0 y Dockerfiles propios
 deploy/compose.yml        Despliegue Docker del runtime
 deploy/chatbox/           Configuración de Chatbox Lite
 docs/                     Arquitectura y documentación operativa
+tools/                    Utilidades de metadatos y recomendación musical
 ```
+
+## Recomendador de playlists (experimental)
+
+El flujo `item2vec` aprende asociaciones entre canciones a partir de playlists
+humanas, agrupa las canciones que ya existen en una biblioteca local y propone
+canciones que faltan. Cada propuesta es una afinidad de embedding, **no una
+probabilidad ni una garantía de gusto**.
+
+```text
+playlists autorizadas -> corpus DuckDB -> embeddings item2vec
+                                           |
+biblioteca local ------ coincidencias -----+-> comunidades -> playlists y sugerencias
+```
+
+El código se ejecuta localmente. Las entradas, vectores, bases de datos,
+informes y playlists generadas se ignoran deliberadamente por Git, porque
+pueden contener información personal o estar sujetos a licencias de terceros.
+
+Consulta [la guía del MPD](tools/README-spotify-mpd.md) para conocer los
+requisitos y el orden de ejecución. Si se usa el MPD, cada persona debe contar
+con acceso autorizado y respetar sus términos: este repositorio no concede
+derechos sobre ese dataset.
 
 ## Arranque del runtime
 
@@ -36,4 +62,11 @@ El gateway queda publicado en `http://localhost:8090`; consulta
 
 El repositorio público excluye `.env`, secretos, datos de memoria, auditorías,
 archivos autorizados para MCP, dependencias descargadas y pesos de modelos.
-Consulta [la arquitectura](docs/arquitectura.md) antes de desplegar.
+También excluye los informes y datos de bibliotecas musicales, el MPD, sus
+índices y los embeddings. Consulta [la arquitectura](docs/arquitectura.md)
+antes de desplegar.
+
+## Licencia
+
+El código publicado bajo este repositorio está bajo la [licencia MIT](LICENSE).
+Los datos externos conservan sus propias licencias y condiciones de uso.

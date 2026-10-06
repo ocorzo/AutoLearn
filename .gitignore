@@ -8,6 +8,48 @@ __pycache__/
 .env.*
 !.env.example
 
+# Entornos, cachés y productos de compilación locales.
+.venv*/
+.build/
+.codex-finalizer/
+outputs/
+
+# Datos personales y resultados generados por la revisión de biblioteca musical.
+# Incluyen rutas locales y/o nombres de canciones; jamás deben entrar al repositorio.
+acoustid-*.json
+acoustid-*.jsonl
+acoustid-*.md
+local-tracks-for-mpd.jsonl
+local_tracks_unresolved_for_acoustid.jsonl
+mpd-unlinked-*.csv
+mpd-unlinked-*.md
+music-audit*.json
+music-proposals*.json
+spotify-track-id-proposals-*.csv
+item2vec-analysis*/
+embedding-playlist-drafts/
+
+# Dataset externo, índices, vectores y bases de datos creadas localmente.
+data/
+datasets/
+*.duckdb
+*.sqlite
+*.sqlite3
+*.db
+*.model
+*.kv
+*.vectors
+*.npy
+*.npz
+mpd-*.jsonl
+mpd-*.jsonl.gz
+
+# Binarios auxiliares obtenidos de terceros (por ejemplo, Chromaprint/fpcalc).
+tools/bin/
+
+# Entregables locales que no forman parte del código fuente.
+Entrega_3_AutoLearn_final.docx
+
 # Datos de ejecución locales: nunca se versionan en el repositorio público.
 runtime/
 services/chaak-runtime/allowed-data/*

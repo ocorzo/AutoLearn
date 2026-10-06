@@ -1,6 +1,6 @@
-# Chaak
+# AutoLearn
 
-Chaak es un asistente local compuesto por un frontend Chatbox Lite, un gateway
+AutoLearn es un asistente local compuesto por un frontend Chatbox Lite, un gateway
 compatible con OpenAI, herramientas MCP, un LLM ejecutado localmente y memoria
 persistente con Mem0/Chroma. También incluye el pipeline `autolearn/` para
 entrenamiento y evaluación.
